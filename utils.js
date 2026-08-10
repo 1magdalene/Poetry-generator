@@ -1,13 +1,22 @@
-const imagePromptFromLocalStorage = localStorage.getItem("imagePrompt")
-const quotePromptFromLocalStorage = localStorage.getItem("quotePrompt")
-const imageUrlFromLocalStorage = localStorage.getItem("imageUrl")
-const quoteFromLocalStorage = localStorage.getItem("quote")
-const quoteSpan = document.querySelector(".quote-span")
-const quoteWrapper = document.querySelector(".quote-wrapper")
-const nameSpan = document.querySelector(".name-span")
-const loader = document.getElementById("loader")
+const imagePromptFromLocalStorage =
+  typeof localStorage !== "undefined" ? localStorage.getItem("imagePrompt") : null
+const quotePromptFromLocalStorage =
+  typeof localStorage !== "undefined" ? localStorage.getItem("quotePrompt") : null
+const imageUrlFromLocalStorage =
+  typeof localStorage !== "undefined" ? localStorage.getItem("imageUrl") : null
+const quoteFromLocalStorage =
+  typeof localStorage !== "undefined" ? localStorage.getItem("quote") : null
+const quoteSpan =
+  typeof document !== "undefined" ? document.querySelector(".quote-span") : null
+const quoteWrapper =
+  typeof document !== "undefined" ? document.querySelector(".quote-wrapper") : null
+const nameSpan =
+  typeof document !== "undefined" ? document.querySelector(".name-span") : null
+const loader = typeof document !== "undefined" ? document.getElementById("loader") : null
 
 function startLoading() {
+  if (!nameSpan || !quoteWrapper || !loader) return
+
   nameSpan.style.display = "none"
   quoteWrapper.style.display = "none"
   loader.style.display = "block"
@@ -15,6 +24,8 @@ function startLoading() {
 }
 
 function stopLoading(name, url, quote) {
+  if (!nameSpan || !quoteWrapper || !loader || !quoteSpan) return
+
   nameSpan.style.display = "inline"
   quoteWrapper.style.display = "block"
   loader.style.display = "none"
@@ -30,9 +41,20 @@ export async function generateTextAndImage(
   temperature
 ) {
   startLoading()
-  let url = await getImage(favPlace)
-  let quote = await getQuote(favActivity, favPlace, temperature)
-  stopLoading(name, url, quote)
+
+  try {
+    const url = await getImage(favPlace)
+    const quote = await getQuote(favActivity, favPlace, temperature)
+    stopLoading(name, url, quote)
+  } catch (error) {
+    console.error("Unable to generate content:", error)
+    stopLoading(
+      name,
+      "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1200&q=80",
+      createFallbackQuote(favActivity, favPlace)
+    )
+  }
+
   return
 }
 
@@ -61,28 +83,39 @@ function getDate() {
   return `${monthName} ${year}`
 }
 
-async function getImage(query) {
-  const response = await fetch(
-    `https://apis.scrimba.com/unsplash/photos/random/?count=1&query=${query}`
-  )
+function createFallbackQuote(favActivity, favPlace) {
+  return `A ${favActivity} beside ${favPlace} becomes a small, bright rebellion against the ordinary.`
+}
 
-  if (response.ok) {
-    const data = await response.json()
-    const imageUrl = data[0].urls.full
-    return imageUrl
-  } else {
-    console.error(`Error: ${response.status}`)
+async function getImage(query) {
+  try {
+    const response = await fetch(
+      `https://apis.scrimba.com/unsplash/photos/random/?count=1&query=${query}`
+    )
+
+    if (response.ok) {
+      const data = await response.json()
+      return data[0].urls.full
+    }
+
+    throw new Error(`Image request failed with status ${response.status}`)
+  } catch (error) {
+    console.error("Image error:", error)
+    return "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1200&q=80"
   }
 }
 
 async function getQuote(favActivity, favPlace, temperature) {
   let quotePrompt = `Create a poetic phrase about ${favActivity} and ${favPlace} in the insightful, witty and satirical style of Oscar Wilde. Omit Oscar Wilde's name.`
 
-  if (quotePrompt === quotePromptFromLocalStorage) {
+  if (quotePrompt === quotePromptFromLocalStorage && quoteFromLocalStorage) {
     return quoteFromLocalStorage
   }
 
-  localStorage.setItem("quotePrompt", quotePrompt)
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem("quotePrompt", quotePrompt)
+  }
+
   let body = {
     model: "text-davinci-003",
     prompt: quotePrompt,
@@ -93,16 +126,39 @@ async function getQuote(favActivity, favPlace, temperature) {
     presence_penalty: 0,
   }
 
-  let res = await fetch("https://apis.scrimba.com/openai/v1/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  })
+  try {
+    let res = await fetch("https://apis.scrimba.com/openai/v1/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
 
-  let response = await res.json()
-  let newQuote = response.choices[0].text
-  localStorage.setItem("quote", newQuote)
-  return newQuote
+    if (!res.ok) {
+      throw new Error(`Quote request failed with status ${res.status}`)
+    }
+
+    let response = await res.json()
+    let newQuote = response.choices?.[0]?.text?.trim()
+
+    if (!newQuote) {
+      throw new Error("No quote returned from the API")
+    }
+
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("quote", newQuote)
+    }
+
+    return newQuote
+  } catch (error) {
+    console.error("Quote error:", error)
+    const fallbackQuote = createFallbackQuote(favActivity, favPlace)
+
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("quote", fallbackQuote)
+    }
+
+    return fallbackQuote
+  }
 }
